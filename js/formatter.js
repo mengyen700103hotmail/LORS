@@ -32,14 +32,21 @@ export function formatPersonDetail(data, personName, monthDot) {
     .forEach(([date, people]) => {
       if (!people[personName]) return;
 
-      const { mealPrice, drinkPrice } = people[personName];
+      const { mealName, mealPrice, drinkName, drinkPrice } = people[personName];
       const sum = mealPrice + drinkPrice;
       if (sum === 0) return;
 
       const day = date.slice(8, 10);
       personTotal += sum;
 
-      output += `${monthDot}.${day} ${mealPrice}+${drinkPrice}=${sum}\n`;
+      output += `${monthDot}.${day}\n`;
+      if (mealPrice > 0) {
+        output += `  餐點：${mealName || "午餐"} ${mealPrice}\n`;
+      }
+      if (drinkPrice > 0) {
+        output += `  飲料：${drinkName || "飲料"} ${drinkPrice}\n`;
+      }
+      output += `  小計：${sum}\n\n`;
     });
 
   output += `\n${personName} 總金額：${personTotal}\n`;
