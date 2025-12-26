@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8" />
+  <title>午餐月結統計 / 明細查詢</title>
+
+  <style>
+    body {
+      font-family: Consolas, "Microsoft JhengHei", monospace;
+      padding: 20px;
+      line-height: 1.6;
+    }
+
+    h1 {
+      margin-bottom: 10px;
+    }
+
+    .field {
+      margin-bottom: 10px;
+    }
+
+    input {
+      padding: 4px 6px;
+      font-size: 14px;
+    }
+
+    button {
+      padding: 6px 14px;
+      font-size: 14px;
+      cursor: pointer;
+    }
+
+    pre {
+      margin-top: 5px; /* 調整 pre 的上邊距 */
+      background: #f5f5f5;
+      padding: 15px;
+      white-space: pre-wrap;
+    }
+
+    /* 新增的分頁樣式 */
+    .tabs {
+      margin-top: 20px;
+      border-bottom: 2px solid #ccc;
+    }
+    .tab-button {
+      padding: 10px 15px;
+      cursor: pointer;
+      border: 1px solid #ccc;
+      border-bottom: none;
+      background-color: #eee;
+      display: inline-block;
+      margin-bottom: -2px; /* 為了讓 tab-button 的底線與 tabs 的底線重合 */
+    }
+    .tab-button.active {
+      background-color: #fff;
+      border-color: #ccc;
+      border-bottom: 1px solid #fff; /* 隱藏底線 */
+      font-weight: bold;
+    }
+    .tab-content {
+      padding: 15px 0;
+    }
+    .hidden {
+      display: none;
+    }
+  </style>
+</head>
+
+<body>
+
+<h1>午餐月結統計 / 明細查詢</h1>
+
+<div class="field">
+  <label>
+    請選擇 LINE 文字檔：
+    <input type="file" id="fileInput" accept=".txt" />
+  </label>
+</div>
+
+<div class="field">
+  <label>
+    結算月份（YYYY.MM）：
+    <input id="monthInput" placeholder="2025.11" />
+  </label>
+</div>
+
+<div class="field">
+  <label>
+    查詢人員：
+    <select id="nameSelect" disabled>
+      <option value="">請先計算</option>
+    </select>
+  </label>
+</div>
+
+<div class="field">
+  <button id="calcBtn">計算</button>
+</div>
+
+<div id="resultContainer" class="hidden">
+  <div class="tabs">
+    <div class="tab-button active" id="summaryTab">總表</div>
+    <div class="tab-button" id="detailTab">明細</div>
+  </div>
+
+  <div class="tab-content" id="summaryContent">
+    <pre id="summaryResult"></pre>
+  </div>
+
+  <div class="tab-content hidden" id="detailContent">
+    <pre id="detailResult">請選擇查詢人員</pre>
+  </div>
+</div>
+
+<!-- 一定要 module -->
+<script type="module" src="js/main.js"></script>
+
+</body>
+</html>
