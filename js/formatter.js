@@ -1,7 +1,6 @@
 // js/formatter.js
 
-// ① 月總表
-export function formatMonthlySummary(data, monthDot) {
+export function formatMonthlySummary(data) {
   const total = {};
   let grandTotal = 0;
 
@@ -14,7 +13,6 @@ export function formatMonthlySummary(data, monthDot) {
   });
 
   let output = "";
-
   Object.entries(total)
     .sort((a, b) => b[1] - a[1])
     .forEach(([name, sum]) => {
@@ -25,9 +23,8 @@ export function formatMonthlySummary(data, monthDot) {
   return output;
 }
 
-// ② 單人每日明細
 export function formatPersonDetail(data, personName, monthDot) {
-  let output = ``;
+  let output = "";
   let personTotal = 0;
 
   Object.entries(data)
@@ -35,22 +32,14 @@ export function formatPersonDetail(data, personName, monthDot) {
     .forEach(([date, people]) => {
       if (!people[personName]) return;
 
-      const { mealName, mealPrice, drinkName, drinkPrice } = people[personName];
-      const day = date.slice(8, 10);
+      const { mealPrice, drinkPrice } = people[personName];
       const sum = mealPrice + drinkPrice;
+      if (sum === 0) return;
 
-      if (sum === 0) return; // 沒訂餐/飲料則跳過這一天
-
+      const day = date.slice(8, 10);
       personTotal += sum;
 
-      output += `${monthDot}.${day}\n`;
-      if (mealPrice > 0) {
-        output += `  餐點：${mealName} ${mealPrice}\n`;
-      }
-      if (drinkPrice > 0) {
-        output += `  飲料：${drinkName} ${drinkPrice}\n`;
-      }
-      output += `  小計：${sum}\n\n`; // 每天結束多一個換行
+      output += `${monthDot}.${day} ${mealPrice}+${drinkPrice}=${sum}\n`;
     });
 
   output += `\n${personName} 總金額：${personTotal}\n`;
