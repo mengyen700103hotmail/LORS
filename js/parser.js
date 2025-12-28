@@ -1,118 +1,117 @@
 // js/parser.js
 export function parseLunchFile(text, targetMonthDot) {
-  const targetMonth = targetMonthDot.replace(".", "-"); // 2025-09
-  const lines = text.split(/\r?\n/);
+    const lines = text.split(/\r?\n/);
+    const result = {};
+    const targetPattern = targetMonthDot.replace(/\./g, "-");
 
-  // date -> name -> { mealName, mealPrice, drinkName, drinkPrice }
-  const result = {};
+    const datePositions = [];
+    lines.forEach((line, idx) => {
+        const m = line.match(/^(\d{4}\.\d{2}\.\d{2})/);
+        if (m) datePositions.push({ idx, date: m[1].replace(/\./g, "-") });
+    });
 
-  let currentDate = null;
-  let currentType = null;
-  let inSettlement = false;
-  let tempDaily = null;
-  let afterFinalClose = false;
+    for (let i = 0; i < datePositions.length; i++) {
+        const { idx: start, date } = datePositions[i];
+        if (!date.startsWith(targetPattern)) continue;
+        const end = datePositions[i + 1] ? datePositions[i + 1].idx : lines.length;
+        const dayBlock = lines.slice(start, end);
 
-  function ensurePerson(name) {
-    if (!tempDaily[name]) {
-      tempDaily[name] = {
-        mealName: "",
-        mealPrice: 0,
-        drinkName: "",
-        drinkPrice: 0
-      };
+        let lastHeaderIdx = -1;
+        for (let j = dayBlock.length - 1; j >= 0; j--) {
+            if (dayBlock[j].trim() === "午餐") {
+                lastHeaderIdx = j;
+                break;
+            }
+        }
+
+        if (lastHeaderIdx !== -1) {
+            result[date] = processFinalStructure(dayBlock.slice(lastHeaderIdx));
+        }
     }
-  }
+    return result;
+}
 
-  function commitDaily() {
-    if (currentDate && tempDaily && Object.keys(tempDaily).length > 0) {
-      result[currentDate] = tempDaily;
+function processFinalStructure(lines) {
+    const dayData = {};
+    let mode = null;
+
+    lines.forEach(line => {
+        const t = line.trim();
+        if (!t) return;
+
+        if (t === "午餐") { mode = "meal"; return; }
+        if (t === "---" || t.includes("飲料")) { mode = "drink"; return; }
+        if (t.match(/^[13]F/) || t.includes("結單") || t.includes("$$月結")) return;
+        if (t.includes("+") && t.includes("=") && !t.includes("-")) return;
+
+        const mainMatch = t.match(/^([^\d\s\-:：]{2,5})\s*[-:：]\s*(.*)$/);
+        if (mainMatch && mode) {
+            let name = mainMatch[1].trim();
+            const fullContent = mainMatch[2].trim();
+
+            if (!dayData[name]) {
+                dayData[name] = { meals: [], mealPrice: 0, drinks: [], drinkPrice: 0, hasError: false };
+            }
+
+            // 處理等號結構 (優先)
+            if (fullContent.includes('=')) {
+                const parts = fullContent.split('=');
+                const rightPart = parts[parts.length - 1].trim();
+                const totalPriceMatch = rightPart.match(/\d+/);
+                
+                if (totalPriceMatch) {
+                    const price = parseInt(totalPriceMatch[0], 10);
+                    const itemName = parts[0].trim(); 
+                    addEntry(dayData[name], mode, itemName, price);
+                    return;
+                }
+            }
+
+            // 處理普通結構或 A+B
+            const items = fullContent.split('+');
+            items.forEach(itemStr => {
+                const allNumbers = itemStr.match(/\d+/g);
+                if (allNumbers) {
+                    const priceStr = allNumbers[allNumbers.length - 1];
+                    const price = parseInt(priceStr, 10);
+                    
+                    // 【關鍵修正】: 移除品項名稱末尾的金額數字，避免重複
+                    // 尋找最後一個數字的位置並切除
+                    const lastNumIndex = itemStr.lastIndexOf(priceStr);
+                    const itemName = itemStr.substring(0, lastNumIndex).trim();
+                    
+                    // 如果切完後 itemName 為空 (例如只有數字 80)，則保留原樣
+                    const finalItemName = itemName || itemStr.replace(priceStr, "").trim();
+
+                    addEntry(dayData[name], mode, finalItemName, price);
+                } else {
+                    markError(dayData[name], mode, itemStr.trim(), "找不到金額數字");
+                }
+            });
+        }
+    });
+
+    const finalData = {};
+    for (const name in dayData) {
+        const displayName = dayData[name].hasError ? `${name}*` : name;
+        finalData[displayName] = dayData[name];
     }
-  }
+    return finalData;
+}
 
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i].trim();
-
-    // 日期行
-    const dm = line.match(/^(\d{4})\.(\d{2})\.(\d{2})/);
-    if (dm) {
-      commitDaily();
-      currentDate = `${dm[1]}-${dm[2]}-${dm[3]}`;
-      tempDaily = null;
-      inSettlement = false;
-      afterFinalClose = false;
-      continue;
+function addEntry(personObj, mode, itemName, price) {
+    if (mode === "meal") {
+        personObj.meals.push({ name: itemName, price: price });
+        personObj.mealPrice += price;
+    } else {
+        personObj.drinks.push({ name: itemName, price: price });
+        personObj.drinkPrice += price;
     }
+}
 
-    // 開始新的結單（以下xx結單）
-    if (line.includes("以下") && line.includes("結單")) {
-      commitDaily();
-
-      if (currentDate && currentDate.startsWith(targetMonth)) {
-        tempDaily = {};
-        inSettlement = true;
-        afterFinalClose = false;
-        currentType = null;
-      }
-      continue;
-    }
-
-    // 結單結束標記
-    if (line.includes("結單~")) {
-      inSettlement = false;
-      afterFinalClose = true;
-      continue;
-    }
-
-    if (!currentDate || !currentDate.startsWith(targetMonth) || !tempDaily) {
-      continue;
-    }
-
-    // 午餐 / 飲料
-    if (line === "午餐") {
-      currentType = "meal";
-      continue;
-    }
-    if (line === "飲料") {
-      currentType = "drink";
-      continue;
-    }
-
-    // === 正常結單內容 ===
-    if (inSettlement && currentType) {
-      const m = line.match(/^([^-$\d]+?)-(.*?)\s*(\d+)$/);
-      if (!m) continue;
-
-      const name = m[1].trim();
-      const item = m[2].trim();
-      const price = Number(m[3]);
-
-      ensurePerson(name);
-
-      if (currentType === "meal") {
-        tempDaily[name].mealName = item;
-        tempDaily[name].mealPrice = price;
-      } else {
-        tempDaily[name].drinkName = item;
-        tempDaily[name].drinkPrice = price;
-      }
-      continue;
-    }
-
-    // === 結單後「扣款修正」格式：149-13=136 ===
-    if (afterFinalClose) {
-      const fix = line.match(/^([^-$\d]+?)-.*?(\d+)\s*-\s*(\d+)\s*=\s*(\d+)/);
-      if (!fix) continue;
-
-      const name = fix[1].trim();
-      const finalPrice = Number(fix[4]);
-
-      ensurePerson(name);
-
-      // 👉 修正一律視為「餐點金額覆蓋」
-      tempDaily[name].mealPrice = finalPrice;
-    }
-  }
-
-  commitDaily();
-  return result;
+function markError(personObj, mode, content, reason) {
+    personObj.hasError = true;
+    const errorItem = { name: `⚠️ 無法判斷: ${content} (${reason})`, price: 0 };
+    if (mode === "meal") personObj.meals.push(errorItem);
+    else personObj.drinks.push(errorItem);
 }

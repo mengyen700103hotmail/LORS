@@ -1,81 +1,143 @@
 // js/main.js
-import { parseLunchFile } from "./parser.js";
-import { formatMonthlySummary, formatPersonDetail } from "./formatter.js";
+import { parseLunchFile } from './parser.js';
+import { formatPersonalDetail, formatForLine } from './formatter.js';
 
-let lunchData = {};
-let currentMonthDot = "";
+let globalParsedData = {};
+let personalStats = {};
+let rawFileText = ""; 
 
-const nameSelect = document.getElementById("nameSelect");
-const summaryResult = document.getElementById("summaryResult");
-const detailResult = document.getElementById("detailResult");
-const calcBtn = document.getElementById("calcBtn");
+// 初始化
+const fileInput = document.getElementById('fileInput');
+const monthSelect = document.getElementById('monthSelect');
+const personSelect = document.getElementById('personSelect');
+const copyBtn = document.getElementById('copyBtn');
 
-calcBtn.addEventListener("click", () => {
-  const file = document.getElementById("fileInput").files[0];
-  const monthDot = document.getElementById("monthInput").value.trim();
+fileInput.addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
 
-  if (!file || !monthDot) {
-    alert("請選檔案並輸入月份（YYYY.MM）");
-    return;
-  }
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+        rawFileText = event.target.result;
+        console.log("檔案讀取完成，長度：", rawFileText.length);
+        
+        const hasMonths = updateMonthOptions(rawFileText);
+        
+        if (hasMonths) {
+            runAnalysis(); // 強制執行分析
+        } else {
+            alert("在檔案中找不到任何日期標記（格式需為 YYYY.MM.DD）");
+        }
+    };
+    reader.readAsText(file);
+});
 
-  const reader = new FileReader();
-  reader.onload = () => {
-    lunchData = parseLunchFile(reader.result, monthDot);
-    currentMonthDot = monthDot;
+monthSelect.addEventListener('change', () => {
+    if (rawFileText) runAnalysis();
+});
 
-    summaryResult.textContent = formatMonthlySummary(lunchData);
+function updateMonthOptions(text) {
+    const monthSet = new Set();
+    // 修正的正則表達式，確保能抓到 LINE 格式的日期
+    const dateMatches = text.match(/\d{4}\.\d{2}\.\d{2}/g);
+    
+    if (!dateMatches) return false;
 
-    // 顯示結果區域
-    const resultContainer = document.getElementById("resultContainer");
-    if (resultContainer) {
-      resultContainer.classList.remove("hidden");
+    dateMatches.forEach(dateStr => {
+        const parts = dateStr.split('.');
+        monthSet.add(`${parts[0]}.${parts[1]}`); 
+    });
+
+    const sortedMonths = Array.from(monthSet).sort().reverse();
+    
+    if (sortedMonths.length > 0) {
+        monthSelect.innerHTML = ''; 
+        sortedMonths.forEach(m => {
+            const opt = document.createElement('option');
+            opt.value = m;
+            opt.textContent = m.replace('.', '年') + '月';
+            monthSelect.appendChild(opt);
+        });
+        return true;
+    }
+    return false;
+}
+
+function runAnalysis() {
+    const month = monthSelect.value;
+    if (!month) return;
+
+    console.log("正在分析月份：", month);
+    globalParsedData = parseLunchFile(rawFileText, month);
+    
+    processStats();
+    renderSummary();
+}
+
+function processStats() {
+    personalStats = {};
+    for (const date in globalParsedData) {
+        const dayData = globalParsedData[date];
+        for (const name in dayData) {
+            if (!personalStats[name]) {
+                personalStats[name] = { total: 0, dates: {} };
+            }
+            personalStats[name].dates[date] = dayData[name];
+            personalStats[name].total += (dayData[name].mealPrice + dayData[name].drinkPrice);
+        }
+    }
+}
+
+function renderSummary() {
+    const summaryBody = document.querySelector('#summaryTable tbody');
+    summaryBody.innerHTML = '';
+    personSelect.innerHTML = '<option value="">-- 選擇人員 --</option>';
+
+    const sortedNames = Object.keys(personalStats).sort();
+    
+    if (sortedNames.length === 0) {
+        summaryBody.innerHTML = '<tr><td colspan="2" style="text-align:center;">該月份無點餐紀錄</td></tr>';
+        return;
     }
 
-    // 填人名
-    const names = new Set();
-    Object.values(lunchData).forEach(day =>
-      Object.keys(day).forEach(n => names.add(n))
-    );
+    sortedNames.forEach(name => {
+        const row = document.createElement('tr');
+        row.innerHTML = `<td>${name}</td><td>${personalStats[name].total}</td>`;
+        summaryBody.appendChild(row);
 
-    nameSelect.innerHTML = `<option value="">請選擇人員</option>`;
-    nameSelect.disabled = false;
-    [...names].sort().forEach(n => {
-      const opt = document.createElement("option");
-      opt.value = n;
-      opt.textContent = n;
-      nameSelect.appendChild(opt);
+        const option = document.createElement('option');
+        option.value = name;
+        option.textContent = name;
+        personSelect.appendChild(option);
     });
-  };
 
-  reader.readAsText(file, "utf-8");
-});
+    document.getElementById('selectedPersonName').textContent = '-';
+    document.getElementById('personalDetail').innerHTML = '<p style="color: #999; text-align: center;">請選擇人員查看明細</p>';
+    copyBtn.style.display = 'none';
+}
 
-// 頁籤切換邏輯
-const summaryTab = document.getElementById("summaryTab");
-const detailTab = document.getElementById("detailTab");
-const summaryContent = document.getElementById("summaryContent");
-const detailContent = document.getElementById("detailContent");
+personSelect.addEventListener('change', (e) => {
+    const name = e.target.value;
+    const detailDiv = document.getElementById('personalDetail');
+    const titleSpan = document.getElementById('selectedPersonName');
+    const currentMonth = monthSelect.value;
 
-summaryTab.addEventListener("click", () => {
-  summaryTab.classList.add("active");
-  detailTab.classList.remove("active");
-  summaryContent.classList.remove("hidden");
-  detailContent.classList.add("hidden");
-});
-
-detailTab.addEventListener("click", () => {
-  detailTab.classList.add("active");
-  summaryTab.classList.remove("active");
-  detailContent.classList.remove("hidden");
-  summaryContent.classList.add("hidden");
-});
-
-nameSelect.addEventListener("change", e => {
-  if (!e.target.value) return;
-  detailResult.textContent = formatPersonDetail(
-    lunchData,
-    e.target.value,
-    currentMonthDot
-  );
+    if (name && personalStats[name]) {
+        titleSpan.textContent = name;
+        detailDiv.innerHTML = formatPersonalDetail(personalStats[name]);
+        copyBtn.style.display = 'inline-block';
+        
+        copyBtn.onclick = () => {
+            const textToCopy = formatForLine(name, personalStats[name], currentMonth);
+            navigator.clipboard.writeText(textToCopy).then(() => {
+                const originalText = copyBtn.innerHTML;
+                copyBtn.innerHTML = '✅ 已複製';
+                setTimeout(() => copyBtn.innerHTML = originalText, 2000);
+            });
+        };
+    } else {
+        titleSpan.textContent = '-';
+        detailDiv.innerHTML = '<p style="color: #999; text-align: center;">請選擇人員</p>';
+        copyBtn.style.display = 'none';
+    }
 });

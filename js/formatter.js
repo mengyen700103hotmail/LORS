@@ -1,54 +1,18 @@
-// js/formatter.js
-
-export function formatMonthlySummary(data) {
-  const total = {};
-  let grandTotal = 0;
-
-  Object.values(data).forEach(day => {
-    Object.entries(day).forEach(([name, { mealPrice, drinkPrice }]) => {
-      const sum = mealPrice + drinkPrice;
-      total[name] = (total[name] || 0) + sum;
-      grandTotal += sum;
+// js/formatter.js (部分修正)
+export function formatForLine(name, personData, currentMonth) {
+    const sortedDates = Object.keys(personData.dates).sort();
+    const displayMonth = currentMonth.replace('.', '年') + '月';
+    let text = `【${name} ${displayMonth}餐點明細】\n`;
+    
+    sortedDates.forEach(date => {
+        const day = personData.dates[date];
+        const mealItems = day.meals.map(m => `${m.name} ${m.price}`);
+        const drinkItems = day.drinks.map(d => `${d.name} ${d.price}`);
+        const allItems = [...mealItems, ...drinkItems].join('、');
+        text += `${date} ${allItems}，小計:${day.mealPrice + day.drinkPrice}\n`;
     });
-  });
-
-  let output = "";
-  Object.entries(total)
-    .sort((a, b) => b[1] - a[1])
-    .forEach(([name, sum]) => {
-      output += `${name} ${sum}\n`;
-    });
-
-  output += `\n總金額：${grandTotal}\n`;
-  return output;
+    
+    text += `-------------------\n總計：${personData.total} 元`;
+    return text;
 }
-
-export function formatPersonDetail(data, personName, monthDot) {
-  let output = "";
-  let personTotal = 0;
-
-  Object.entries(data)
-    .sort()
-    .forEach(([date, people]) => {
-      if (!people[personName]) return;
-
-      const { mealName, mealPrice, drinkName, drinkPrice } = people[personName];
-      const sum = mealPrice + drinkPrice;
-      if (sum === 0) return;
-
-      const day = date.slice(8, 10);
-      personTotal += sum;
-
-      output += `${monthDot}.${day}\n`;
-      if (mealPrice > 0) {
-        output += `  餐點：${mealName || "午餐"} ${mealPrice}\n`;
-      }
-      if (drinkPrice > 0) {
-        output += `  飲料：${drinkName || "飲料"} ${drinkPrice}\n`;
-      }
-      output += `  小計：${sum}\n\n`;
-    });
-
-  output += `\n${personName} 總金額：${personTotal}\n`;
-  return output;
-}
+// formatPersonalDetail 函數維持不變即可
