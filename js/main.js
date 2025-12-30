@@ -6,138 +6,79 @@ let globalParsedData = {};
 let personalStats = {};
 let rawFileText = ""; 
 
-// 初始化
 const fileInput = document.getElementById('fileInput');
 const monthSelect = document.getElementById('monthSelect');
 const personSelect = document.getElementById('personSelect');
+const summaryBody = document.querySelector('#summaryTable tbody');
 const copyBtn = document.getElementById('copyBtn');
 
-fileInput.addEventListener('change', async (e) => {
+fileInput.addEventListener('change', (e) => {
     const file = e.target.files[0];
     if (!file) return;
-
     const reader = new FileReader();
-    reader.onload = async (event) => {
+    reader.onload = (event) => {
         rawFileText = event.target.result;
-        console.log("檔案讀取完成，長度：", rawFileText.length);
-        
-        const hasMonths = updateMonthOptions(rawFileText);
-        
-        if (hasMonths) {
-            runAnalysis(); // 強制執行分析
-        } else {
-            alert("在檔案中找不到任何日期標記（格式需為 YYYY.MM.DD）");
-        }
+        updateMonthOptions(rawFileText);
+        runAnalysis();
     };
     reader.readAsText(file);
 });
 
-monthSelect.addEventListener('change', () => {
-    if (rawFileText) runAnalysis();
-});
+monthSelect.addEventListener('change', runAnalysis);
 
 function updateMonthOptions(text) {
     const monthSet = new Set();
-    // 修正的正則表達式，確保能抓到 LINE 格式的日期
     const dateMatches = text.match(/\d{4}\.\d{2}\.\d{2}/g);
-    
-    if (!dateMatches) return false;
-
-    dateMatches.forEach(dateStr => {
-        const parts = dateStr.split('.');
-        monthSet.add(`${parts[0]}.${parts[1]}`); 
-    });
-
-    const sortedMonths = Array.from(monthSet).sort().reverse();
-    
-    if (sortedMonths.length > 0) {
-        monthSelect.innerHTML = ''; 
-        sortedMonths.forEach(m => {
-            const opt = document.createElement('option');
-            opt.value = m;
-            opt.textContent = m.replace('.', '年') + '月';
-            monthSelect.appendChild(opt);
-        });
-        return true;
+    if (dateMatches) {
+        dateMatches.forEach(d => monthSet.add(d.substring(0, 7)));
     }
-    return false;
+    const sorted = Array.from(monthSet).sort().reverse();
+    monthSelect.innerHTML = sorted.map(m => `<option value="${m}">${m.replace('.','年')}月</option>`).join('');
 }
 
 function runAnalysis() {
     const month = monthSelect.value;
-    if (!month) return;
-
-    console.log("正在分析月份：", month);
     globalParsedData = parseLunchFile(rawFileText, month);
-    
-    processStats();
-    renderSummary();
-}
-
-function processStats() {
     personalStats = {};
     for (const date in globalParsedData) {
         const dayData = globalParsedData[date];
         for (const name in dayData) {
-            if (!personalStats[name]) {
-                personalStats[name] = { total: 0, dates: {} };
-            }
+            if (!personalStats[name]) personalStats[name] = { total: 0, dates: {}, hasError: false };
             personalStats[name].dates[date] = dayData[name];
-            personalStats[name].total += (dayData[name].mealPrice + dayData[name].drinkPrice);
+            personalStats[name].total += dayData[name].total;
+            if (dayData[name].hasError) personalStats[name].hasError = true;
         }
     }
+    renderSummary();
 }
 
 function renderSummary() {
-    const summaryBody = document.querySelector('#summaryTable tbody');
     summaryBody.innerHTML = '';
     personSelect.innerHTML = '<option value="">-- 選擇人員 --</option>';
-
-    const sortedNames = Object.keys(personalStats).sort();
-    
-    if (sortedNames.length === 0) {
-        summaryBody.innerHTML = '<tr><td colspan="2" style="text-align:center;">該月份無點餐紀錄</td></tr>';
-        return;
-    }
-
-    sortedNames.forEach(name => {
+    Object.keys(personalStats).sort().forEach(name => {
+        const isError = personalStats[name].hasError;
+        const star = isError ? '<span style="color:red">*</span>' : '';
         const row = document.createElement('tr');
-        row.innerHTML = `<td>${name}</td><td>${personalStats[name].total}</td>`;
+        row.innerHTML = `<td>${name}${star}</td><td>${personalStats[name].total}</td>`;
+        row.style.cursor = "pointer";
+        row.onclick = () => { personSelect.value = name; displayDetail(name); };
         summaryBody.appendChild(row);
-
+        
+        // 選單也加上 *
         const option = document.createElement('option');
         option.value = name;
-        option.textContent = name;
+        option.textContent = isError ? `${name}*` : name;
         personSelect.appendChild(option);
     });
-
-    document.getElementById('selectedPersonName').textContent = '-';
-    document.getElementById('personalDetail').innerHTML = '<p style="color: #999; text-align: center;">請選擇人員查看明細</p>';
-    copyBtn.style.display = 'none';
 }
 
-personSelect.addEventListener('change', (e) => {
-    const name = e.target.value;
-    const detailDiv = document.getElementById('personalDetail');
-    const titleSpan = document.getElementById('selectedPersonName');
-    const currentMonth = monthSelect.value;
-
-    if (name && personalStats[name]) {
-        titleSpan.textContent = name;
-        detailDiv.innerHTML = formatPersonalDetail(personalStats[name]);
-        copyBtn.style.display = 'inline-block';
-        
-        copyBtn.onclick = () => {
-            const textToCopy = formatForLine(name, personalStats[name], currentMonth);
-            navigator.clipboard.writeText(textToCopy).then(() => {
-                const originalText = copyBtn.innerHTML;
-                copyBtn.innerHTML = '✅ 已複製';
-                setTimeout(() => copyBtn.innerHTML = originalText, 2000);
-            });
-        };
-    } else {
-        titleSpan.textContent = '-';
-        detailDiv.innerHTML = '<p style="color: #999; text-align: center;">請選擇人員</p>';
-        copyBtn.style.display = 'none';
-    }
-});
+function displayDetail(name) {
+    if (!name || !personalStats[name]) return;
+    document.getElementById('selectedPersonName').textContent = name;
+    document.getElementById('personalDetail').innerHTML = formatPersonalDetail(personalStats[name]);
+    copyBtn.style.display = 'inline-block';
+    copyBtn.onclick = () => {
+        const text = formatForLine(name, personalStats[name], monthSelect.value);
+        navigator.clipboard.writeText(text).then(() => alert('已複製明細'));
+    };
+}

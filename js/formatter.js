@@ -1,18 +1,26 @@
-// js/formatter.js (部分修正)
-export function formatForLine(name, personData, currentMonth) {
+// js/formatter.js
+export function formatPersonalDetail(personData) {
+    let html = '';
     const sortedDates = Object.keys(personData.dates).sort();
-    const displayMonth = currentMonth.replace('.', '年') + '月';
-    let text = `【${name} ${displayMonth}餐點明細】\n`;
-    
     sortedDates.forEach(date => {
         const day = personData.dates[date];
-        const mealItems = day.meals.map(m => `${m.name} ${m.price}`);
-        const drinkItems = day.drinks.map(d => `${d.name} ${d.price}`);
-        const allItems = [...mealItems, ...drinkItems].join('、');
-        text += `${date} ${allItems}，小計:${day.mealPrice + day.drinkPrice}\n`;
+        const items = [...day.meals, ...day.drinks].map(i => i.name).join('、');
+        html += `<div style="display:flex; justify-content:space-between; padding:8px 0; border-bottom:1px solid #eee;">
+                    <span>${date}：${items}</span>
+                    <span style="font-weight:bold; color:#d9534f;">${day.total}</span>
+                 </div>`;
     });
-    
+    html += `<div style="text-align:right; font-weight:bold; padding-top:10px;">總計：${personData.total} 元</div>`;
+    return html;
+}
+
+export function formatForLine(name, personData, month) {
+    let text = `【${name} ${month.replace('.','年')}月餐點明細】\n`;
+    Object.keys(personData.dates).sort().forEach(date => {
+        const day = personData.dates[date];
+        const items = [...day.meals, ...day.drinks].map(i => i.name).join('、');
+        text += `${date} ${items}，金額:${day.total}\n`;
+    });
     text += `-------------------\n總計：${personData.total} 元`;
     return text;
 }
-// formatPersonalDetail 函數維持不變即可
