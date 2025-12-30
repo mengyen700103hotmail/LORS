@@ -2,7 +2,7 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>餐點費用統計系統 - 進階版</title>
+    <title>餐點費用統計系統 - 全功能整合版</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     <style>
         body { font-family: "Microsoft JhengHei", sans-serif; background: #f4f7f6; margin: 0; padding: 20px; }
@@ -10,26 +10,35 @@
         h1 { text-align: center; color: #333; }
         .control-panel { display: flex; gap: 20px; background: #e9ecef; padding: 20px; border-radius: 6px; margin-bottom: 20px; align-items: center; }
         .main-content { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
-        .section { border: 1px solid #ddd; border-radius: 6px; padding: 15px; min-height: 500px; background: #fff; display: flex; flex-direction: column; }
+        .section { border: 1px solid #ddd; border-radius: 6px; padding: 15px; min-height: 550px; background: #fff; display: flex; flex-direction: column; }
         h3 { margin-top: 0; border-bottom: 2px solid #eee; padding-bottom: 10px; display: flex; justify-content: space-between; align-items: center; }
-        table { width: 100%; border-collapse: collapse; }
-        th, td { text-align: left; padding: 12px; border-bottom: 1px solid #eee; }
-        th { background-color: #f8f9fa; }
-        .detail-box { background: #fafafa; padding: 15px; border-radius: 4px; border: 1px inset #eee; flex-grow: 1; overflow-y: auto; }
-        .detail-row { padding: 5px 0; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: baseline; white-space: nowrap; font-size: 14px; }
-        .detail-content { flex: 1; padding-right: 15px; }
-        .detail-sub { color: #d9534f; font-weight: bold; min-width: 45px; text-align: right; }
+        
+        /* 表格結構 */
+        .scroll-area { flex-grow: 1; overflow-y: auto; border: 1px solid #eee; }
+        table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+        th, td { text-align: left; padding: 10px; border-bottom: 1px solid #eee; }
+        th { background-color: #f8f9fa; position: sticky; top: 0; z-index: 10; }
+        
+        /* 總計與排除樣式 */
+        .total-divider { background-color: #fff9e6; font-weight: bold; border-top: 2px solid #ffcc00; border-bottom: 2px solid #ffcc00; }
+        .excluded-header-row { background-color: #f0f0f0; color: #777; font-size: 13px; text-align: center; }
+        .excluded-row { background-color: #fafafa; color: #aaa; }
+        
+        .name-cell { display: flex; align-items: center; gap: 8px; cursor: pointer; }
         .red-star { color: #ff0000; font-weight: bold; }
         .btn-group { display: flex; gap: 8px; }
         .btn { border: none; padding: 8px 12px; border-radius: 4px; cursor: pointer; color: white; font-size: 13px; display: none; }
         #copyBtn { background-color: #28a745; }
         #copyImgBtn { background-color: #007bff; }
-        tr:hover { background-color: #f9f9f9; cursor: pointer; }
+        
+        /* 非月結區域 */
         .non-monthly-box { margin-top: 15px; padding: 10px; background: #fff3f3; border-left: 4px solid #d9534f; font-size: 14px; color: #666; }
-        .clickable-date { color: #007bff; text-decoration: underline; cursor: pointer; margin-right: 8px; }
-        .clickable-date:hover { color: #0056b3; }
+        .clickable-date { color: #007bff; text-decoration: underline; cursor: pointer; margin-right: 8px; font-weight: bold; }
+
+        .detail-box { background: #fafafa; padding: 15px; border-radius: 4px; border: 1px inset #eee; flex-grow: 1; overflow-y: auto; }
+        .detail-row { padding: 5px 0; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: baseline; white-space: nowrap; font-size: 14px; }
+        .detail-sub { color: #d9534f; font-weight: bold; min-width: 45px; text-align: right; }
         .capturing .detail-box { overflow: visible !important; height: auto !important; border: none !important; background: white !important; }
-        .total-row { font-weight: bold; background-color: #fff9e6; border-top: 2px solid #ddd; }
     </style>
 </head>
 <body>
@@ -43,16 +52,20 @@
     <div class="main-content">
         <div class="section">
             <h3>人員費用總表</h3>
-            <div style="flex-grow: 1; overflow-y: auto;">
+            <div class="scroll-area" id="summaryScrollArea">
                 <table id="summaryTable">
-                    <thead><tr><th>姓名</th><th>總額</th></tr></thead>
-                    <tbody></tbody>
-                    <tfoot>
-                        <tr class="total-row">
+                    <thead><tr><th style="width:70%">姓名</th><th style="width:30%">總額</th></tr></thead>
+                    <tbody id="includedBody"></tbody>
+                    <tbody>
+                        <tr class="total-divider">
                             <td>全體總計</td>
                             <td id="grandTotal">0</td>
                         </tr>
-                    </tfoot>
+                        <tr class="excluded-header-row">
+                            <td colspan="2">▼ 排除不計區域 (不列入總額)</td>
+                        </tr>
+                    </tbody>
+                    <tbody id="excludedBody" class="excluded-row"></tbody>
                 </table>
             </div>
             <div id="nonMonthlyList" class="non-monthly-box" style="display:none;"></div>
@@ -76,40 +89,34 @@
 
 <script>
     let rawFileText = "";
-    let forceIncludeDates = new Set(); // 紀錄使用者手動勾選為月結的日期
-    let globalParsedData = {};
+    let forceIncludeDates = new Set();
+    let excludedUsers = new Set();
     let personalStats = {};
     let nonMonthlyDates = [];
 
-    // --- 解析邏輯 ---
     function parseLunchFile(text, targetMonth) {
-        const lines = text.replace(/\r\n/g, '\n').split('\n');
+        const lines = text.split(/\r?\n/);
         const result = {};
         const dateRegex = /^(\d{4}\.\d{2}\.\d{2})/;
         let datePositions = [];
         nonMonthlyDates = [];
 
         lines.forEach((line, idx) => {
-            const m = line.trim().match(dateRegex);
+            const m = line.match(dateRegex);
             if (m) datePositions.push({ idx, date: m[1].replace(/\./g, '-') });
         });
 
         datePositions.forEach((pos, i) => {
-            const target = targetMonth.replace('.', '-');
-            if (!pos.date.startsWith(target)) return;
+            if (!pos.date.startsWith(targetMonth.replace('.','-'))) return;
             const nextIdx = datePositions[i+1] ? datePositions[i+1].idx : lines.length;
             const dayLines = lines.slice(pos.idx, nextIdx);
             
-            // 判斷是否為月結：原本就有 $$月結 或者 被使用者手動強制加入
-            const hasMonthlyTag = dayLines.some(l => l.includes("$$月結"));
+            const isMonthly = dayLines.some(l => l.includes("$$月結"));
             const isForced = forceIncludeDates.has(pos.date.replace(/-/g, '.'));
-            
-            if (hasMonthlyTag || isForced) {
-                let lastLunchIdx = -1;
-                for (let j = dayLines.length - 1; j >= 0; j--) {
-                    if (dayLines[j].trim() === "午餐") { lastLunchIdx = j; break; }
-                }
-                if (lastLunchIdx !== -1) result[pos.date] = extractDayData(dayLines.slice(lastLunchIdx));
+
+            if (isMonthly || isForced) {
+                let lunchIdx = dayLines.findLastIndex(l => l.trim() === "午餐");
+                if (lunchIdx !== -1) result[pos.date] = extractDayData(dayLines.slice(lunchIdx));
             } else {
                 nonMonthlyDates.push(pos.date.replace(/-/g, '.'));
             }
@@ -129,169 +136,153 @@
             if (nameMatch) {
                 let name = nameMatch[1].trim().replace(/^\$/, ''); 
                 let content = nameMatch[2].trim();
-                if (!dayData[name]) dayData[name] = { meal: 0, drink: 0, items: [], hasError: false };
-                let price = null;
-                const lastNumMatch = content.match(/(\d+)$/);
-                if (content.includes('=')) {
-                    const parts = content.split('=');
-                    const numMatch = parts[parts.length - 1].match(/\d+/);
-                    if (numMatch) price = parseInt(numMatch[0]);
-                } else if (lastNumMatch) price = parseInt(lastNumMatch[1]);
-                if (price === null) {
-                    dayData[name].hasError = true;
-                    dayData[name].items.push("⚠️ " + content);
-                } else {
-                    if (mode === "meal") dayData[name].meal += price;
-                    else dayData[name].drink += price;
-                    dayData[name].items.push(content);
-                }
+                if (!dayData[name]) dayData[name] = { total: 0, items: [], hasError: false };
+                let price = content.includes('=') ? parseInt(content.split('=').pop().match(/\d+/)) : parseInt(content.match(/\d+$/));
+                if (isNaN(price)) { dayData[name].hasError = true; dayData[name].items.push("⚠️ " + content); }
+                else { dayData[name].total += price; dayData[name].items.push(content); }
             }
         });
         return dayData;
     }
 
-    // --- UI 渲染 ---
-    document.getElementById('fileInput').addEventListener('change', function(e) {
+    document.getElementById('fileInput').addEventListener('change', e => {
         const reader = new FileReader();
-        reader.onload = function() {
+        reader.onload = () => {
             rawFileText = reader.result;
-            forceIncludeDates.clear(); // 新上傳檔案時清空手動記錄
-            const dateMatches = rawFileText.match(/\d{4}\.\d{2}\.\d{2}/g);
-            if (dateMatches) {
-                const months = [...new Set(dateMatches.map(d => d.substring(0, 7)))].sort().reverse();
-                document.getElementById('monthSelect').innerHTML = months.map(m => `<option value="${m}">${m.replace('.','年')}月</option>`).join('');
+            const matches = rawFileText.match(/\d{4}\.\d{2}\.\d{2}/g);
+            if(matches) {
+                const months = [...new Set(matches.map(d => d.substring(0, 7)))].sort().reverse();
+                document.getElementById('monthSelect').innerHTML = months.map(m => `<option value="${m}">${m}月</option>`).join('');
                 render();
             }
         };
         reader.readAsText(e.target.files[0]);
     });
 
-    document.getElementById('monthSelect').addEventListener('change', () => {
-        forceIncludeDates.clear(); // 切換月份時建議也清空手動記錄，避免跨月混淆
-        render();
-    });
+    document.getElementById('monthSelect').addEventListener('change', render);
 
     function render() {
         const month = document.getElementById('monthSelect').value;
-        if (!month) return;
-        globalParsedData = parseLunchFile(rawFileText, month);
+        const data = parseLunchFile(rawFileText, month);
         personalStats = {};
-        let totalSum = 0;
-
-        for (let date in globalParsedData) {
-            for (let name in globalParsedData[date]) {
+        for (let date in data) {
+            for (let name in data[date]) {
                 if (!personalStats[name]) personalStats[name] = { total: 0, details: [], error: false };
-                const d = globalParsedData[date][name];
-                const daySum = (d.meal + d.drink);
-                personalStats[name].total += daySum;
-                totalSum += daySum;
-                if (d.hasError) personalStats[name].error = true;
-                personalStats[name].details.push({ date, text: d.items.join('、'), sub: daySum });
+                personalStats[name].total += data[date][name].total;
+                if (data[date][name].hasError) personalStats[name].error = true;
+                personalStats[name].details.push({ date, text: data[date][name].items.join('、'), sub: data[date][name].total });
             }
         }
-        
-        const tbody = document.querySelector('#summaryTable tbody');
+        buildTable();
+        renderNonMonthly();
+    }
+
+    function buildTable() {
+        const scrollArea = document.getElementById('summaryScrollArea');
+        const currentScroll = scrollArea.scrollTop;
+
+        const incBody = document.getElementById('includedBody');
+        const excBody = document.getElementById('excludedBody');
         const pSelect = document.getElementById('personSelect');
-        const currentSelected = pSelect.value;
-        tbody.innerHTML = '';
+        const selVal = pSelect.value;
+
+        incBody.innerHTML = ''; excBody.innerHTML = '';
         pSelect.innerHTML = '<option value="">-- 選擇人員 --</option>';
-        
+
+        let grandTotal = 0;
         Object.keys(personalStats).sort().forEach(name => {
-            const hasError = personalStats[name].error;
-            const starHtml = hasError ? '<span class="red-star">*</span>' : '';
-            const row = document.createElement('tr');
-            row.innerHTML = `<td>${name}${starHtml}</td><td>${personalStats[name].total}</td>`;
-            row.onclick = () => { pSelect.value = name; updateDetail(name); };
-            tbody.appendChild(row);
-            
-            const option = document.createElement('option');
-            option.value = name;
-            option.textContent = hasError ? name + '*' : name;
-            if (hasError) option.style.color = "red";
-            pSelect.appendChild(option);
+            const isExc = excludedUsers.has(name);
+            const stats = personalStats[name];
+            if (!isExc) grandTotal += stats.total;
+
+            const tr = document.createElement('tr');
+            if (isExc) tr.className = 'excluded-row';
+            tr.innerHTML = `
+                <td>
+                    <div class="name-cell">
+                        <input type="checkbox" ${isExc ? '' : 'checked'} onchange="toggleUser('${name}')">
+                        <span onclick="selectUser('${name}')">${name}${stats.error ? '<span class="red-star">*</span>' : ''}</span>
+                    </div>
+                </td>
+                <td onclick="selectUser('${name}')">${stats.total}</td>
+            `;
+            if (isExc) excBody.appendChild(tr); else incBody.appendChild(tr);
+
+            const opt = document.createElement('option');
+            opt.value = name; opt.textContent = name + (stats.error ? '*' : '');
+            pSelect.appendChild(opt);
         });
 
-        pSelect.value = currentSelected; // 保持原本選擇的人員
-        document.getElementById('grandTotal').textContent = totalSum;
+        document.getElementById('grandTotal').textContent = grandTotal;
+        pSelect.value = selVal;
+        
+        requestAnimationFrame(() => { scrollArea.scrollTop = currentScroll; });
+    }
 
-        // 渲染非月結日期清單 (增加點擊事件)
-        const nonMonthlyEl = document.getElementById('nonMonthlyList');
+    function toggleUser(name) {
+        if (excludedUsers.has(name)) excludedUsers.delete(name);
+        else excludedUsers.add(name);
+        buildTable();
+    }
+
+    function selectUser(name) {
+        document.getElementById('personSelect').value = name;
+        updateDetail(name);
+    }
+
+    function renderNonMonthly() {
+        const el = document.getElementById('nonMonthlyList');
         if (nonMonthlyDates.length > 0) {
-            nonMonthlyEl.style.display = 'block';
-            nonMonthlyEl.innerHTML = `<strong>非月結日期（點擊可加入）：</strong><br>`;
+            el.style.display = 'block';
+            el.innerHTML = `<strong>非月結日期（點擊可加入）：</strong><br>`;
             nonMonthlyDates.forEach(date => {
                 const span = document.createElement('span');
                 span.className = 'clickable-date';
                 span.textContent = date;
-                span.onclick = () => confirmAddToMonthly(date);
-                nonMonthlyEl.appendChild(span);
+                span.onclick = () => {
+                    if (confirm(`是否將日期 ${date} 加入月結累計中？`)) {
+                        forceIncludeDates.add(date);
+                        render();
+                    }
+                };
+                el.appendChild(span);
             });
-        } else {
-            nonMonthlyEl.style.display = 'none';
-        }
-        
-        if (currentSelected) updateDetail(currentSelected);
-    }
-
-    // 處理加入月結的邏輯
-    function confirmAddToMonthly(date) {
-        if (confirm(`是否將日期 ${date} 加入月結累計中？`)) {
-            forceIncludeDates.add(date);
-            render(); // 重新渲染，此日期會跑進月結邏輯
-        }
+        } else el.style.display = 'none';
     }
 
     function updateDetail(name) {
+        const stats = personalStats[name];
+        if(!stats) return;
+        document.getElementById('selectedPersonName').innerHTML = name + (stats.error ? '<span class="red-star">*</span>' : '');
+        document.getElementById('imgTitle').innerHTML = `【${name}${stats.error ? '<span style="color:red">*</span>' : ''} 餐費明細】`;
+        document.getElementById('copyBtn').style.display = document.getElementById('copyImgBtn').style.display = 'inline-block';
         const box = document.getElementById('personalDetail');
-        const btn1 = document.getElementById('copyBtn');
-        const btn2 = document.getElementById('copyImgBtn');
-        const titleSpan = document.getElementById('selectedPersonName');
-        const imgTitle = document.getElementById('imgTitle');
-        
-        if (!name || !personalStats[name]) { 
-            box.innerHTML = ""; btn1.style.display=btn2.style.display="none"; titleSpan.textContent = "-"; return; 
-        }
-        
-        const isError = personalStats[name].error;
-        titleSpan.innerHTML = isError ? `${name}<span class="red-star">*</span>` : name;
-        imgTitle.innerHTML = `【${name}${isError ? '<span style="color:red">*</span>' : ''} 餐費明細】`;
-        btn1.style.display = btn2.style.display = "inline-block";
-        
-        const data = personalStats[name];
-        // 排序明細日期以免加入後順序混亂
-        data.details.sort((a,b) => a.date.localeCompare(b.date));
-        
-        box.innerHTML = data.details.map(i => `
+        box.innerHTML = stats.details.sort((a,b)=>a.date.localeCompare(b.date)).map(d => `
             <div class="detail-row">
-                <span class="detail-content">${i.date.substring(5).replace('-','/')}：${i.text}</span>
-                <span class="detail-sub">${i.sub}</span>
+                <span class="detail-content">${d.date.substring(5).replace('-','/')}：${d.text}</span>
+                <span class="detail-sub">${d.sub}</span>
             </div>
-        `).join('') + `<hr><div style="text-align:right; font-weight:bold; padding-top:5px; font-size:16px;">總計：${data.total} 元</div>`;
+        `).join('') + `<hr><div style="text-align:right; font-weight:bold; padding-top:5px;">總計：${stats.total} 元</div>`;
     }
 
-    document.getElementById('personSelect').addEventListener('change', (e) => updateDetail(e.target.value));
+    document.getElementById('personSelect').addEventListener('change', e => updateDetail(e.target.value));
 
-    document.getElementById('copyBtn').addEventListener('click', function() {
+    document.getElementById('copyBtn').addEventListener('click', () => {
         const name = document.getElementById('personSelect').value;
-        const data = personalStats[name];
-        let text = `【${name}${personalStats[name].error?'*':''} 餐點明細】\n`;
-        data.details.sort((a,b) => a.date.localeCompare(b.date));
-        data.details.forEach(i => text += `${i.date} ${i.text} (${i.sub})\n`);
-        text += `-------------------\n總計：${data.total} 元`;
-        navigator.clipboard.writeText(text).then(() => alert('文字已複製'));
+        const stats = personalStats[name];
+        let txt = `【${name}${stats.error?'*':''} 明細】\n` + stats.details.map(d=>`${d.date} ${d.text} (${d.sub})`).join('\n') + `\n---\n總計：${stats.total}`;
+        navigator.clipboard.writeText(txt).then(()=>alert('文字已複製'));
     });
 
-    document.getElementById('copyImgBtn').addEventListener('click', function() {
+    document.getElementById('copyImgBtn').addEventListener('click', () => {
         const area = document.getElementById('captureArea');
-        const imgTitle = document.getElementById('imgTitle');
-        imgTitle.style.display = 'block';
+        document.getElementById('imgTitle').style.display = 'block';
         document.body.classList.add('capturing');
-        html2canvas(area, { backgroundColor: "#ffffff", scale: 2, useCORS: true }).then(canvas => {
+        html2canvas(area, { scale: 2 }).then(canvas => {
             canvas.toBlob(blob => {
-                const item = new ClipboardItem({ "image/png": blob });
-                navigator.clipboard.write([item]).then(() => {
-                    alert('圖片已複製，可直接在 Line 貼上！');
-                    imgTitle.style.display = 'none';
+                navigator.clipboard.write([new ClipboardItem({"image/png": blob})]).then(()=> {
+                    alert('圖片已複製');
+                    document.getElementById('imgTitle').style.display = 'none';
                     document.body.classList.remove('capturing');
                 });
             });
