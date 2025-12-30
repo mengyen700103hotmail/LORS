@@ -2,7 +2,7 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>餐點費用統計系統 - 全功能整合版</title>
+    <title>餐點費用統計系統 - 編輯整合版</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     <style>
         body { font-family: "Microsoft JhengHei", sans-serif; background: #f4f7f6; margin: 0; padding: 20px; }
@@ -13,13 +13,11 @@
         .section { border: 1px solid #ddd; border-radius: 6px; padding: 15px; min-height: 550px; background: #fff; display: flex; flex-direction: column; }
         h3 { margin-top: 0; border-bottom: 2px solid #eee; padding-bottom: 10px; display: flex; justify-content: space-between; align-items: center; }
         
-        /* 表格結構 */
         .scroll-area { flex-grow: 1; overflow-y: auto; border: 1px solid #eee; }
         table { width: 100%; border-collapse: collapse; table-layout: fixed; }
         th, td { text-align: left; padding: 10px; border-bottom: 1px solid #eee; }
         th { background-color: #f8f9fa; position: sticky; top: 0; z-index: 10; }
         
-        /* 總計與排除樣式 */
         .total-divider { background-color: #fff9e6; font-weight: bold; border-top: 2px solid #ffcc00; border-bottom: 2px solid #ffcc00; }
         .excluded-header-row { background-color: #f0f0f0; color: #777; font-size: 13px; text-align: center; }
         .excluded-row { background-color: #fafafa; color: #aaa; }
@@ -31,13 +29,17 @@
         #copyBtn { background-color: #28a745; }
         #copyImgBtn { background-color: #007bff; }
         
-        /* 非月結區域 */
         .non-monthly-box { margin-top: 15px; padding: 10px; background: #fff3f3; border-left: 4px solid #d9534f; font-size: 14px; color: #666; }
         .clickable-date { color: #007bff; text-decoration: underline; cursor: pointer; margin-right: 8px; font-weight: bold; }
 
+        /* 明細編輯樣式 */
         .detail-box { background: #fafafa; padding: 15px; border-radius: 4px; border: 1px inset #eee; flex-grow: 1; overflow-y: auto; }
-        .detail-row { padding: 5px 0; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: baseline; white-space: nowrap; font-size: 14px; }
-        .detail-sub { color: #d9534f; font-weight: bold; min-width: 45px; text-align: right; }
+        .detail-row { padding: 5px 0; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: center; white-space: nowrap; font-size: 14px; }
+        .detail-content { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+        .price-input { width: 50px; text-align: right; border: 1px solid #ccc; border-radius: 3px; padding: 2px 5px; font-family: inherit; font-weight: bold; color: #d9534f; }
+        .price-input:focus { outline: 2px solid #007bff; border-color: transparent; }
+
+        .capturing .price-input { border: none; background: transparent; padding: 0; }
         .capturing .detail-box { overflow: visible !important; height: auto !important; border: none !important; background: white !important; }
     </style>
 </head>
@@ -110,7 +112,6 @@
             if (!pos.date.startsWith(targetMonth.replace('.','-'))) return;
             const nextIdx = datePositions[i+1] ? datePositions[i+1].idx : lines.length;
             const dayLines = lines.slice(pos.idx, nextIdx);
-            
             const isMonthly = dayLines.some(l => l.includes("$$月結"));
             const isForced = forceIncludeDates.has(pos.date.replace(/-/g, '.'));
 
@@ -138,8 +139,13 @@
                 let content = nameMatch[2].trim();
                 if (!dayData[name]) dayData[name] = { total: 0, items: [], hasError: false };
                 let price = content.includes('=') ? parseInt(content.split('=').pop().match(/\d+/)) : parseInt(content.match(/\d+$/));
-                if (isNaN(price)) { dayData[name].hasError = true; dayData[name].items.push("⚠️ " + content); }
-                else { dayData[name].total += price; dayData[name].items.push(content); }
+                if (isNaN(price)) { 
+                    dayData[name].hasError = true; 
+                    dayData[name].items.push({ text: "⚠️ " + content, price: 0 }); 
+                } else { 
+                    dayData[name].total += price; 
+                    dayData[name].items.push({ text: content, price: price }); 
+                }
             }
         });
         return dayData;
@@ -170,7 +176,9 @@
                 if (!personalStats[name]) personalStats[name] = { total: 0, details: [], error: false };
                 personalStats[name].total += data[date][name].total;
                 if (data[date][name].hasError) personalStats[name].error = true;
-                personalStats[name].details.push({ date, text: data[date][name].items.join('、'), sub: data[date][name].total });
+                data[date][name].items.forEach(item => {
+                    personalStats[name].details.push({ date, text: item.text, price: item.price });
+                });
             }
         }
         buildTable();
@@ -180,7 +188,6 @@
     function buildTable() {
         const scrollArea = document.getElementById('summaryScrollArea');
         const currentScroll = scrollArea.scrollTop;
-
         const incBody = document.getElementById('includedBody');
         const excBody = document.getElementById('excludedBody');
         const pSelect = document.getElementById('personSelect');
@@ -204,7 +211,7 @@
                         <span onclick="selectUser('${name}')">${name}${stats.error ? '<span class="red-star">*</span>' : ''}</span>
                     </div>
                 </td>
-                <td onclick="selectUser('${name}')">${stats.total}</td>
+                <td onclick="selectUser('${name}')" id="sum-${name}">${stats.total}</td>
             `;
             if (isExc) excBody.appendChild(tr); else incBody.appendChild(tr);
 
@@ -215,7 +222,6 @@
 
         document.getElementById('grandTotal').textContent = grandTotal;
         pSelect.value = selVal;
-        
         requestAnimationFrame(() => { scrollArea.scrollTop = currentScroll; });
     }
 
@@ -228,6 +234,45 @@
     function selectUser(name) {
         document.getElementById('personSelect').value = name;
         updateDetail(name);
+    }
+
+    function handlePriceChange(name, detailIndex, newPrice) {
+        const val = parseInt(newPrice) || 0;
+        personalStats[name].details[detailIndex].price = val;
+        
+        // 重新計算個人總額
+        const newTotal = personalStats[name].details.reduce((sum, d) => sum + d.price, 0);
+        personalStats[name].total = newTotal;
+        
+        // 更新 UI
+        document.getElementById(`detail-total-${name}`).textContent = newTotal;
+        document.getElementById(`sum-${name}`).textContent = newTotal;
+        
+        // 更新全體總計
+        let grand = 0;
+        Object.keys(personalStats).forEach(n => {
+            if (!excludedUsers.has(n)) grand += personalStats[n].total;
+        });
+        document.getElementById('grandTotal').textContent = grand;
+    }
+
+    function updateDetail(name) {
+        const stats = personalStats[name];
+        if(!stats) return;
+        document.getElementById('selectedPersonName').innerHTML = name + (stats.error ? '<span class="red-star">*</span>' : '');
+        document.getElementById('imgTitle').innerHTML = `【${name}${stats.error ? '<span style="color:red">*</span>' : ''} 餐費明細】`;
+        document.getElementById('copyBtn').style.display = document.getElementById('copyImgBtn').style.display = 'inline-block';
+        
+        const box = document.getElementById('personalDetail');
+        stats.details.sort((a,b)=>a.date.localeCompare(b.date));
+        
+        box.innerHTML = stats.details.map((d, index) => `
+            <div class="detail-row">
+                <span class="detail-content">${d.date.substring(5).replace('-','/')}：${d.text}</span>
+                <input type="number" class="price-input" value="${d.price}" 
+                    oninput="handlePriceChange('${name}', ${index}, this.value)">
+            </div>
+        `).join('') + `<hr><div style="text-align:right; font-weight:bold; padding-top:5px;">總計：<span id="detail-total-${name}">${stats.total}</span> 元</div>`;
     }
 
     function renderNonMonthly() {
@@ -250,27 +295,12 @@
         } else el.style.display = 'none';
     }
 
-    function updateDetail(name) {
-        const stats = personalStats[name];
-        if(!stats) return;
-        document.getElementById('selectedPersonName').innerHTML = name + (stats.error ? '<span class="red-star">*</span>' : '');
-        document.getElementById('imgTitle').innerHTML = `【${name}${stats.error ? '<span style="color:red">*</span>' : ''} 餐費明細】`;
-        document.getElementById('copyBtn').style.display = document.getElementById('copyImgBtn').style.display = 'inline-block';
-        const box = document.getElementById('personalDetail');
-        box.innerHTML = stats.details.sort((a,b)=>a.date.localeCompare(b.date)).map(d => `
-            <div class="detail-row">
-                <span class="detail-content">${d.date.substring(5).replace('-','/')}：${d.text}</span>
-                <span class="detail-sub">${d.sub}</span>
-            </div>
-        `).join('') + `<hr><div style="text-align:right; font-weight:bold; padding-top:5px;">總計：${stats.total} 元</div>`;
-    }
-
     document.getElementById('personSelect').addEventListener('change', e => updateDetail(e.target.value));
 
     document.getElementById('copyBtn').addEventListener('click', () => {
         const name = document.getElementById('personSelect').value;
         const stats = personalStats[name];
-        let txt = `【${name}${stats.error?'*':''} 明細】\n` + stats.details.map(d=>`${d.date} ${d.text} (${d.sub})`).join('\n') + `\n---\n總計：${stats.total}`;
+        let txt = `【${name}${stats.error?'*':''} 明細】\n` + stats.details.map(d=>`${d.date} ${d.text} (${d.price})`).join('\n') + `\n---\n總計：${stats.total}`;
         navigator.clipboard.writeText(txt).then(()=>alert('文字已複製'));
     });
 
