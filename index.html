@@ -2,7 +2,7 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>餐點費用統計系統 - 編輯整合版</title>
+    <title>餐點費用統計系統 - 截圖優化版</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     <style>
         body { font-family: "Microsoft JhengHei", sans-serif; background: #f4f7f6; margin: 0; padding: 20px; }
@@ -19,7 +19,7 @@
         th { background-color: #f8f9fa; position: sticky; top: 0; z-index: 10; }
         
         .total-divider { background-color: #fff9e6; font-weight: bold; border-top: 2px solid #ffcc00; border-bottom: 2px solid #ffcc00; }
-        .excluded-header-row { background-color: #f0f0f0; color: #777; font-size: 13px; text-align: center; }
+        .excluded-header-row { background-color: #f0f0f0; color: #777; font-size: 13px; text-align: center; font-weight: bold; }
         .excluded-row { background-color: #fafafa; color: #aaa; }
         
         .name-cell { display: flex; align-items: center; gap: 8px; cursor: pointer; }
@@ -32,15 +32,31 @@
         .non-monthly-box { margin-top: 15px; padding: 10px; background: #fff3f3; border-left: 4px solid #d9534f; font-size: 14px; color: #666; }
         .clickable-date { color: #007bff; text-decoration: underline; cursor: pointer; margin-right: 8px; font-weight: bold; }
 
-        /* 明細編輯樣式 */
+        /* 明細區域樣式 */
         .detail-box { background: #fafafa; padding: 15px; border-radius: 4px; border: 1px inset #eee; flex-grow: 1; overflow-y: auto; }
-        .detail-row { padding: 5px 0; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: center; white-space: nowrap; font-size: 14px; }
-        .detail-content { flex: 1; overflow: hidden; text-overflow: ellipsis; }
-        .price-input { width: 50px; text-align: right; border: 1px solid #ccc; border-radius: 3px; padding: 2px 5px; font-family: inherit; font-weight: bold; color: #d9534f; }
-        .price-input:focus { outline: 2px solid #007bff; border-color: transparent; }
+        .detail-row { padding: 8px 0; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: center; font-size: 16px; }
+        .detail-content { flex: 1; padding-right: 15px; line-height: 1.4; }
+        
+        /* 正常的編輯框樣式 */
+        .price-input { 
+            width: 70px; 
+            text-align: right; 
+            border: 1px solid #ccc; 
+            border-radius: 4px; 
+            padding: 4px; 
+            font-size: 16px;
+            font-weight: bold; 
+            color: #d9534f;
+        }
 
-        .capturing .price-input { border: none; background: transparent; padding: 0; }
+        /* 截圖時顯示的純文字標籤 (預設隱藏) */
+        .price-text { display: none; font-weight: bold; color: #d9534f; font-size: 16px; }
+
+        /* 截圖模式下的特殊處理：隱藏 Input，顯示純文字 */
+        .capturing .price-input { display: none !important; }
+        .capturing .price-text { display: inline !important; }
         .capturing .detail-box { overflow: visible !important; height: auto !important; border: none !important; background: white !important; }
+        .capturing .detail-row { border-bottom: 1px solid #ddd; padding: 10px 0; }
     </style>
 </head>
 <body>
@@ -82,7 +98,7 @@
             </h3>
             <select id="personSelect" style="width: 100%; margin-bottom: 15px;"><option value="">-- 選擇人員 --</option></select>
             <div id="captureArea" style="background: white; padding: 15px;">
-                <h4 id="imgTitle" style="margin: 0 0 10px 0; display:none; border-bottom: 2px solid #333; padding-bottom: 5px;"></h4>
+                <h4 id="imgTitle" style="margin: 0 0 10px 0; display:none; border-bottom: 2px solid #333; padding-bottom: 5px; font-size: 18px;"></h4>
                 <div id="personalDetail" class="detail-box"></div>
             </div>
         </div>
@@ -112,10 +128,7 @@
             if (!pos.date.startsWith(targetMonth.replace('.','-'))) return;
             const nextIdx = datePositions[i+1] ? datePositions[i+1].idx : lines.length;
             const dayLines = lines.slice(pos.idx, nextIdx);
-            const isMonthly = dayLines.some(l => l.includes("$$月結"));
-            const isForced = forceIncludeDates.has(pos.date.replace(/-/g, '.'));
-
-            if (isMonthly || isForced) {
+            if (dayLines.some(l => l.includes("$$月結")) || forceIncludeDates.has(pos.date.replace(/-/g, '.'))) {
                 let lunchIdx = dayLines.findLastIndex(l => l.trim() === "午餐");
                 if (lunchIdx !== -1) result[pos.date] = extractDayData(dayLines.slice(lunchIdx));
             } else {
@@ -236,23 +249,20 @@
         updateDetail(name);
     }
 
-    function handlePriceChange(name, detailIndex, newPrice) {
+    function handlePriceChange(name, detailIndex, newPrice, inputEl) {
         const val = parseInt(newPrice) || 0;
         personalStats[name].details[detailIndex].price = val;
         
-        // 重新計算個人總額
+        // 同步更新隱藏的純文字標籤內容
+        inputEl.nextElementSibling.textContent = val;
+
         const newTotal = personalStats[name].details.reduce((sum, d) => sum + d.price, 0);
         personalStats[name].total = newTotal;
-        
-        // 更新 UI
         document.getElementById(`detail-total-${name}`).textContent = newTotal;
         document.getElementById(`sum-${name}`).textContent = newTotal;
         
-        // 更新全體總計
         let grand = 0;
-        Object.keys(personalStats).forEach(n => {
-            if (!excludedUsers.has(n)) grand += personalStats[n].total;
-        });
+        Object.keys(personalStats).forEach(n => { if (!excludedUsers.has(n)) grand += personalStats[n].total; });
         document.getElementById('grandTotal').textContent = grand;
     }
 
@@ -269,10 +279,10 @@
         box.innerHTML = stats.details.map((d, index) => `
             <div class="detail-row">
                 <span class="detail-content">${d.date.substring(5).replace('-','/')}：${d.text}</span>
-                <input type="number" class="price-input" value="${d.price}" 
-                    oninput="handlePriceChange('${name}', ${index}, this.value)">
+                <input type="number" class="price-input" value="${d.price}" oninput="handlePriceChange('${name}', ${index}, this.value, this)">
+                <span class="price-text">${d.price}</span>
             </div>
-        `).join('') + `<hr><div style="text-align:right; font-weight:bold; padding-top:5px;">總計：<span id="detail-total-${name}">${stats.total}</span> 元</div>`;
+        `).join('') + `<hr><div style="text-align:right; font-weight:bold; padding-top:10px; font-size:18px;">總計：<span id="detail-total-${name}">${stats.total}</span> 元</div>`;
     }
 
     function renderNonMonthly() {
@@ -284,12 +294,7 @@
                 const span = document.createElement('span');
                 span.className = 'clickable-date';
                 span.textContent = date;
-                span.onclick = () => {
-                    if (confirm(`是否將日期 ${date} 加入月結累計中？`)) {
-                        forceIncludeDates.add(date);
-                        render();
-                    }
-                };
+                span.onclick = () => { if (confirm(`是否將日期 ${date} 加入月結累計中？`)) { forceIncludeDates.add(date); render(); } };
                 el.appendChild(span);
             });
         } else el.style.display = 'none';
@@ -306,17 +311,25 @@
 
     document.getElementById('copyImgBtn').addEventListener('click', () => {
         const area = document.getElementById('captureArea');
-        document.getElementById('imgTitle').style.display = 'block';
+        const imgTitle = document.getElementById('imgTitle');
+        
+        imgTitle.style.display = 'block';
         document.body.classList.add('capturing');
-        html2canvas(area, { scale: 2 }).then(canvas => {
-            canvas.toBlob(blob => {
-                navigator.clipboard.write([new ClipboardItem({"image/png": blob})]).then(()=> {
-                    alert('圖片已複製');
-                    document.getElementById('imgTitle').style.display = 'none';
-                    document.body.classList.remove('capturing');
+        
+        setTimeout(() => {
+            html2canvas(area, { 
+                scale: 2, // 2倍即可，太高反而會讓字顯得太小
+                backgroundColor: "#ffffff"
+            }).then(canvas => {
+                canvas.toBlob(blob => {
+                    navigator.clipboard.write([new ClipboardItem({"image/png": blob})]).then(()=> {
+                        alert('圖片已複製！數字現在顯示為清晰文字。');
+                        imgTitle.style.display = 'none';
+                        document.body.classList.remove('capturing');
+                    });
                 });
             });
-        });
+        }, 150);
     });
 </script>
 </body>
