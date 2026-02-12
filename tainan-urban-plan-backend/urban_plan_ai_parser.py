@@ -14,11 +14,11 @@ from firebase_admin import firestore
 
 class UrbanPlanAIParser:
     """
-    都市計畫 AI 解析核心 (V26.2: Geospatial Map Matching)
+    都市計畫 AI 解析核心 (V26.4: Anti-Stuck & Safe JSON Parsing)
     
-    1. 位置比對：將使用者上傳圖與資料庫中的分區地圖執行「對位分析」，確保分區判定不因字體模糊而誤判。
-    2. 信心檢核：若無法精確匹配地圖位置，主動建議使用者提供「包含周邊道路名稱」的更大範圍圖。
-    3. 法律試算：嚴格執行 30% (道路) + 10% (區域加成) = 40% 容移上限，並詳列其他獎勵。
+    1. 防呆解析：強制去除非標準的 JSON 雜訊 (如 Markdown 格式)，避免解析當機。
+    2. 視覺強化：【最高優先】精確辨識分區文字（嚴格區分六與四）。
+    3. 錯誤捕捉：若查無資料庫或發生異常，確實回傳 error / not_found 狀態給前端。
     """
 
     def __init__(self, api_key=None):
@@ -52,34 +52,43 @@ class UrbanPlanAIParser:
         if not name: return ""
         return str(name).replace(" ", "").replace("　", "").replace("台", "臺").lower()
 
+    def _safe_parse_json(self, text):
+        """強制去除 Markdown 標記，防止 json.loads 卡死"""
+        try:
+            text = text.strip()
+            if text.startswith("```json"):
+                text = text[7:]
+            if text.startswith("```"):
+                text = text[3:]
+            if text.endswith("```"):
+                text = text[:-3]
+            return json.loads(text.strip())
+        except Exception as e:
+            raise ValueError(f"AI 回傳格式非標準 JSON: {text}")
+
     def query_land_by_image(self, image_path, site_area=None, roads=None):
-        if not self.client: return {"error": "API Key 未設定"}
-        if not self.db: return {"error": "資料庫未連線"}
+        if not self.client: return {"status": "error", "message": "API Key 未設定"}
+        if not self.db: return {"status": "error", "message": "資料庫未連線"}
 
         try:
             with open(image_path, "rb") as f:
                 image_bytes = f.read()
             user_img = Image.open(io.BytesIO(image_bytes))
 
-            # 1. 視覺與對位分析：要求 AI 將此圖與資料庫的分區圖進行比對
+            # 1. 視覺分析
             location_prompt = """
-            你是一位專業的都市計畫技師，正在進行「基地位置與分區圖對位」。
+            分析這張都市計畫圖：
+            1. **【分區辨識】**：精確辨識基地上的文字（如住六-一、住八）。必須嚴格區分「六」與「四」，請放大檢視筆畫特徵。
+            2. **【道路辨識】**：尋找基地面臨的每一條道路寬度（如 15M, 20M）。
+            3. **【品質檢核】**：若分區模糊或看不見道路數字，請在 feedback_suggestion 給出建議（如「請局部放大」或「加大擷取範圍」）。
             
-            【任務】：
-            1. **【地圖對位】**：將此上傳圖與你記憶中的台南細部計畫圖(如九份子 A14)進行空間對比。
-            2. **【分區精確判定】**：尋找基地範圍內的標記。
-               - **警告**：請極度仔細區分「住六-一」與「住四-一」。住六-一通常鄰接主要大馬路且容積較高。
-            3. **【品質檢核】**：
-               - 若範圍太小無法確定周邊道路關係：feedback = "請『加大擷取地圖範圍』，需包含周邊主要道路名稱以利對位"。
-               - 若字體太小：feedback = "分區標註模糊，請針對基地處進行『局部放大』截圖"。
-            
-            輸出 JSON:
+            必須只輸出純 JSON 格式（不可包含 Markdown）：
             {
               "district": "行政區",
-              "section": "地段",
-              "detected_zone": "分區精確標註",
+              "detected_zone": "分區名稱",
+              "detected_roads": [{"width": "數字", "type": "plan_road"}],
               "is_confident": true/false,
-              "feedback_suggestion": "具體操作建議"
+              "feedback_suggestion": "若無則為空字串"
             }
             """
             loc_resp = self.client.models.generate_content(
@@ -87,14 +96,14 @@ class UrbanPlanAIParser:
                 contents=[location_prompt, user_img],
                 config=types.GenerateContentConfig(response_mime_type="application/json")
             )
-            loc_data = json.loads(loc_resp.text)
             
-            # 信心回饋邏輯
+            loc_data = self._safe_parse_json(loc_resp.text)
+            
+            # 診斷建議邏輯
             if not loc_data.get("is_confident") and loc_data.get("feedback_suggestion"):
-                return {
-                    "status": "need_better_image",
-                    "message": loc_data.get("feedback_suggestion")
-                }
+                 return {"status": "need_better_image", "message": loc_data.get("feedback_suggestion")}
+            if not loc_data.get("detected_roads") and loc_data.get("detected_zone") and not roads:
+                return {"status": "need_better_image", "message": loc_data.get("feedback_suggestion") or "無法辨識基地臨路寬度，請手動輸入道路寬度或加大截圖範圍。"}
 
             target_district_clean = self._normalize_place_name(loc_data.get("district", ""))
 
@@ -109,24 +118,35 @@ class UrbanPlanAIParser:
                     break
 
             if not matched_plan:
-                return {"status": "not_found", "message": f"資料庫查無「{loc_data.get('district')}」資料"}
+                return {"status": "not_found", "message": f"資料庫中尚未建立「{loc_data.get('district') or '該區域'}」的細部計畫資料。請先使用【資料庫建置】功能上傳 PDF。"}
 
             plan_content = json.dumps(matched_plan, ensure_ascii=False, default=str)
-            
-            # 3. 法律試算
+            final_roads = roads if (roads and any(r.get('width') for r in roads)) else loc_data.get("detected_roads", [])
+
+            # 3. 法律深度試算
             analysis_prompt = f"""
             你是一位法律顧問。請針對該基地進行全項獎勵試算。
             
-            【視覺結果】：{json.dumps(loc_data, ensure_ascii=False)}
-            【使用者條件】：面積 {site_area}m², 道路 {json.dumps(roads, ensure_ascii=False)}
-            【細計資料庫】：{plan_content}
+            【輸入數據】：分區 {loc_data.get('detected_zone')}, 道路 {json.dumps(final_roads, ensure_ascii=False)}
+            【法規資料庫】：{plan_content}
             
-            【法律指令】：
-            1. **容積移轉上限**：基準獎勵(max 30%) + 重劃區/空地加成(10%) = 總上限 40%。
-            2. **其他獎勵**：請從計畫書專章中提取針對「{loc_data.get('detected_zone')}」的特定項目。
-               - 包含：增額容積(30%代金)、低碳獎勵(10%)、策略性獎勵等。
+            【指令】：
+            1. **容積移轉上限**：基準(最高 30%) + 加成(重劃區/空地 10%) = 總上限(最高 40%)。
+            2. **其他獎勵**：條列針對此分區的特定項目（如增額容積30%、低碳獎勵10%等）。
             
-            輸出 JSON 包含: matched_area, reasoning, regulations_summary。
+            必須只輸出純 JSON 格式（不可包含 Markdown）：
+            {{
+                "matched_area": "區域名稱",
+                "reasoning": "說明 30%+10% 與分區判定",
+                "regulations_summary": {{
+                    "zone": "判定分區",
+                    "max_tdr_bonus": "上限%",
+                    "max_open_space_bonus": "上限%",
+                    "other_incentives": "在此條列其他獎勵項目",
+                    "setback": "退縮要求",
+                    "bonus_conflict": "互斥說明"
+                }}
+            }}
             """
             
             final_resp = self.client.models.generate_content(
@@ -138,9 +158,10 @@ class UrbanPlanAIParser:
             return {
                 "status": "success",
                 "doc_id": f"{matched_plan.get('district')}_{matched_plan.get('version_date')}",
-                "analysis": json.loads(final_resp.text)
+                "analysis": self._safe_parse_json(final_resp.text)
             }
         except Exception as e:
+            # 發生任何錯誤都會回傳給前端，不再死當
             return {"status": "error", "message": str(e)}
 
     def save_manual_data(self, json_data):
@@ -150,8 +171,4 @@ class UrbanPlanAIParser:
         return {"status": "success", "doc_id": doc_id}
 
     def process_document_background(self, pdf_path):
-        # 背景解析邏輯略... 確保能存入 Firebase
         pass
-
-    def chat_with_plan(self, doc_id, user_question, chat_history=[]):
-        return {"answer": "請在對話框詢問更多細節。"}
